@@ -26,7 +26,7 @@ class AppSettings(BaseModel):
 
 class DatabaseSettings(BaseModel):
     url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5433/hydraulic_mlops",
+        default="postgresql://postgres:postgres@localhost:5433/hydraulic_mlops",
         description="Строка подключения к Postgres (asyncpg)",
     )
     min_size: int = Field(
