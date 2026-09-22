@@ -1,0 +1,37 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Ruff
+.ruff_cache/
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# MLflow
+mlruns/
+
+# Models
+models/
+
+# Data
+data/raw/
+data/processed/
+
+# Secrets
+.env
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.swp

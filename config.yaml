@@ -1,0 +1,13 @@
+log_level: INFO              # DEBUG | INFO | WARNING | ERROR
+environment: development     # development | staging | production — метка в health
+
+app:
+  name: hydraulic-mlops
+  version: "0.1.0"
+  description: "MLOps-система диагностики гидравлических систем"
+
+database:
+  url: postgresql://postgres:postgres@localhost:5433/hydraulic_mlops
+  min_size: 0                  # 0 — не подключаться на старте (поднимемся без БД)
+  max_size: 10                 # максимум соединений в пуле
+  command_timeout: 5.0         # таймаут одного запроса, секунды
