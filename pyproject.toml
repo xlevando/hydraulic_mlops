@@ -11,6 +11,7 @@ start = "src.app:main"
 
 [dependency-groups]
 dev = [
+    "asgi-lifespan>=2.1.0",
     "httpx>=0.28.1",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
@@ -62,6 +63,16 @@ line-ending = "auto"
 skip-magic-trailing-comma = false
 docstring-code-format = true
 docstring-code-line-length = "dynamic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+addopts = [
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-fail-under=80",
+]
 
 [build-system]
 requires = ["hatchling"]
