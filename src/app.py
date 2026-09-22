@@ -1,27 +1,84 @@
+"""Точка сборки приложения FastAPI.
+
+Запуск: `uv run uvicorn src.app:app --reload`
+"""
+
 import logging
+import time
+import uuid
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from starlette.responses import Response
 
-from src.api import v1_router
-from src.config import get_settings
-from src.logging_config import setup_logging
+from src import config, db, logging_config
+from src.api import api_router
+
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    """Жизненный цикл: создать пул БД при старте, закрыть при остановке."""
+    settings = config.get_settings()
+    logging_config.setup_logging(settings.log_level)
+
+    app.state.settings = settings
+    app.state.db_pool = await db.create_db_pool()
+
+    log.info(
+        "Приложение %s v%s запущено (env=%s)",
+        settings.app.name,
+        settings.app.version,
+        settings.environment,
+    )
+
+    try:
+        yield
+    finally:
+        await db.close_db_pool(app.state.db_pool)
+        log.info("Приложение остановлено")
 
 
 def create_app() -> FastAPI:
-    settings = get_settings()
-    setup_logging(settings.log_level)
-    logger = logging.getLogger(__name__)
-
-    logger.info("Starting %s v%s", settings.app.name, settings.app.version)
+    """Собрать и настроить приложение FastAPI."""
+    settings = config.get_settings()
 
     app = FastAPI(
         title=settings.app.name,
         version=settings.app.version,
         description=settings.app.description,
+        lifespan=lifespan,
     )
 
-    app.include_router(v1_router)
-    logger.info("Application configured")
+    @app.middleware("http")
+    async def log_requests(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Поставить request_id в контекст и залогировать запрос."""
+        request_id = uuid.uuid4().hex[:8]
+        token = logging_config.REQUEST_ID.set(request_id)
+        start = time.perf_counter()
+
+        try:
+            response = await call_next(request)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            log.info(
+                "%s %s -> %d (%.1f ms)",
+                request.method,
+                request.url.path,
+                response.status_code,
+                elapsed_ms,
+            )
+        finally:
+            logging_config.REQUEST_ID.reset(token)
+
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    app.include_router(api_router)
     return app
 
 
