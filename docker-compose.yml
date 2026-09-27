@@ -45,6 +45,7 @@ services:
         DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
         LOG_LEVEL: INFO
         ENVIRONMENT: development
+        MLFLOW_TRACKING_URI: http://mlflow:5001
       volumes:
         - ./config.yaml:/app/config.yaml:ro
       ports:
@@ -82,4 +83,5 @@ volumes:
 
 networks:
   hydraulic-network:
+    name: hydraulic-network
     driver: bridge

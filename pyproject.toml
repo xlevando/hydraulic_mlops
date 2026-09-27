@@ -26,6 +26,8 @@ web = [
     "asyncpg>=0.31.0",
     "sqlalchemy[asyncio]>=2.0.54",
     "structlog>=26.1.0",
+    "mlflow[s3]>=3.16.1",
+    "scipy>=1.18.1",
 ]
 
 [tool.ruff]
