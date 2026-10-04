@@ -95,6 +95,8 @@ services:
       # Server host/port
       MLFLOW_HOST: ${MLFLOW_HOST}
       MLFLOW_PORT: ${MLFLOW_PORT}
+
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow:5001,localhost:5001"
     command:
       - /bin/bash
       - -c

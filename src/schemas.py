@@ -55,3 +55,18 @@ class HealthReport(BaseModel):
     status: ReportStatus
     dependencies: dict[str, DependencyHealth]
     total_response_time_ms: float = Field(..., description="Общее время ответа в мс")
+
+
+class ProcessRequest(BaseModel):
+    """Входные признаки одного цикла гидравлической системы."""
+
+    features: dict[str, float] = Field(
+        ...,
+        description="170 инженерных признаков цикла",
+    )
+
+
+class ProcessResponse(BaseModel):
+    """Результат диагностики гидравлической системы."""
+
+    predictions: dict[str, int]

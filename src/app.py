@@ -14,6 +14,7 @@ from starlette.responses import Response
 
 from src import config, db, logging_config
 from src.api import api_router
+from src.services.model_registry import load_champion_models
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     app.state.settings = settings
     app.state.db_pool = await db.create_db_pool()
+
+    log.info("Загрузка champion-моделей из MLflow")
+
+    app.state.models = load_champion_models()
+
+    log.info(
+        "Загружено моделей: %d (%s)",
+        len(app.state.models),
+        ", ".join(app.state.models),
+    )
 
     log.info(
         "Приложение %s v%s запущено (env=%s)",
