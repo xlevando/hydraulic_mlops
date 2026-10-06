@@ -37,3 +37,11 @@ logs:
 # psql внутрь поднятого postgres
 psq:
 	docker compose exec postgres psql -U postgres -d hydraulic_mlops
+
+all-up:
+	docker compose up -d
+	cd infra && docker compose up -d
+
+all-down:
+	cd infra && docker compose down
+	docker compose down
