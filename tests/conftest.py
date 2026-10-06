@@ -1,5 +1,6 @@
 """Общие фикстуры тестов."""
 
+import importlib
 import os
 from unittest.mock import MagicMock
 
@@ -14,8 +15,6 @@ from collections.abc import AsyncGenerator
 import pytest
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
-
-from src.app import app
 
 # 170 признаков
 _FEATURES = [
@@ -43,27 +42,33 @@ _FEATURES = [
 ]
 
 
-def _mock_model():
+def _mock_model() -> MagicMock:
     m = MagicMock()
     m.feature_names_in_ = _FEATURES
     m.predict.return_value = [1]
     return m
 
 
-import src.services.model_registry as model_registry  # noqa: E402
-
-model_registry.load_champion_models = lambda: {
+_MOCK_MODELS = {
     "cooler": _mock_model(),
     "valve": _mock_model(),
     "pump": _mock_model(),
     "accumulator": _mock_model(),
 }
 
+from src.services import model_registry  # noqa: E402
+
+model_registry.load_champion_models = lambda: _MOCK_MODELS
+
+import src.app  # noqa: E402
+
+importlib.reload(src.app)
+
 
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient]:
     """HTTP-клиент приложения: запускает lifespan (пул БД, app.state)."""
-    async with LifespanManager(app):
-        transport = ASGITransport(app=app)
+    async with LifespanManager(src.app.app):
+        transport = ASGITransport(app=src.app.app)
         async with AsyncClient(transport=transport, base_url="http://test") as http:
             yield http
