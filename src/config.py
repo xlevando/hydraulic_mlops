@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class AppSettings(BaseModel):
     name: str = "hydraulic-mlops"
-    version: str = "0.1.1"
+    version: str = "0.1.2"
     description: str = "FastAPI-сервис. MLOps-система диагностики гидравлических систем"
     debug: bool = False
 
