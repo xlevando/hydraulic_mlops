@@ -5,24 +5,24 @@ import logging
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
 
-from src.schemas import ProcessRequest, ProcessResponse
+from src.schemas import TaskRequest, TaskResult
 
 log = logging.getLogger(__name__)
 
-process_router = APIRouter(
+tasks_router = APIRouter(
     prefix="/api/v1",
-    tags=["process"],
+    tags=["tasks"],
 )
 
 
-@process_router.post(
-    "/process",
-    response_model=ProcessResponse,
+@tasks_router.post(
+    "/tasks",
+    response_model=TaskResult,
 )
-async def process(
+async def process_task(
     request: Request,
-    payload: ProcessRequest,
-) -> ProcessResponse:
+    payload: TaskRequest,
+) -> TaskResult:
     """Предсказать состояние компонентов гидравлической системы."""
 
     models = request.app.state.models
@@ -72,10 +72,12 @@ async def process(
         predictions[target] = int(prediction)
 
     log.info(
-        "Hydraulic system processed: predictions=%s",
+        "Task processed: predictions=%s",
         predictions,
     )
 
-    return ProcessResponse(
+    # Пока task_id фиктивный, потом сделаем через очередь
+    return TaskResult(
+        task_id="placeholder",
         predictions=predictions,
     )
