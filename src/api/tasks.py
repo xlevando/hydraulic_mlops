@@ -1,11 +1,19 @@
-"""API-эндпоинт для диагностики гидравлической системы."""
+"""API-эндпоинт для публикации задач в очередь RabbitMQ.
+
+Load shedding: при перегрузке очереди API немедленно возвращает 503
+с заголовком Retry-After, не принимая задачу в обработку.
+
+Валидация признаков происходит здесь (fail fast) — до публикации
+в очередь (экономия ресурсов очереди и воркера)
+"""
 
 import logging
+import uuid
 
-import pandas as pd
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from src.schemas import TaskRequest, TaskResult
+from src.broker import TASKS_QUEUE, broker
+from src.schemas import TaskAcceptedResponse, TaskRequest
 
 log = logging.getLogger(__name__)
 
@@ -17,67 +25,61 @@ tasks_router = APIRouter(
 
 @tasks_router.post(
     "/tasks",
-    response_model=TaskResult,
+    response_model=TaskAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
-async def process_task(
+async def create_task(
     request: Request,
+    response: Response,
     payload: TaskRequest,
-) -> TaskResult:
-    """Предсказать состояние компонентов гидравлической системы."""
-
+) -> TaskAcceptedResponse:
+    """Опубликовать задачу в очередь.
+    Load shedding:
+        Если очередь переполнена, API возвращает 503 + Retry-After.
+        Задача не остаётся в системе в состоянии PENDING.
+    """
+    # валидация признаков (fail fast)
     models = request.app.state.models
 
     if not models:
         raise HTTPException(
-            status_code=503,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Models are not loaded",
         )
 
-    # Все модели обучались на одном и том же наборе из 170 признаков.
     reference_model = next(iter(models.values()))
+    expected_features = set(reference_model.feature_names_in_)
+    received_features = set(payload.features.keys())
 
-    expected_features = list(reference_model.feature_names_in_)
+    missing = expected_features - received_features
+    unexpected = received_features - expected_features
 
-    received_features = set(payload.features)
-
-    missing_features = set(expected_features) - received_features
-
-    unexpected_features = received_features - set(expected_features)
-
-    if missing_features or unexpected_features:
+    if missing or unexpected:
         detail = {}
-
-        if missing_features:
-            detail["missing_features"] = sorted(missing_features)
-
-        if unexpected_features:
-            detail["unexpected_features"] = sorted(unexpected_features)
-
+        if missing:
+            detail["missing_features"] = sorted(missing)
+        if unexpected:
+            detail["unexpected_features"] = sorted(unexpected)
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=detail,
         )
 
-    # DataFrame создаём в том же порядке признаков,
-    # в котором модель видела их при обучении.
-    X = pd.DataFrame(  # noqa: N806
-        [[payload.features[feature] for feature in expected_features]],
-        columns=expected_features,
-    )
+    #  публикация в очередь
+    task_id = uuid.uuid4().hex[:12]
 
-    predictions: dict[str, int] = {}
+    try:
+        await broker.publish(
+            {"task_id": task_id, "features": payload.features},
+            queue=TASKS_QUEUE,
+        )
+    except Exception as e:
+        log.warning("Publish rejected (queue overloaded): %s", e)
+        response.headers["Retry-After"] = "60"
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Queue overloaded. Retry after 60s.",
+        ) from e
 
-    for target, model in models.items():
-        prediction = model.predict(X)[0]
-        predictions[target] = int(prediction)
-
-    log.info(
-        "Task processed: predictions=%s",
-        predictions,
-    )
-
-    # Пока task_id фиктивный, потом сделаем через очередь
-    return TaskResult(
-        task_id="placeholder",
-        predictions=predictions,
-    )
+    log.info("Task %s accepted", task_id)
+    return TaskAcceptedResponse(task_id=task_id)
