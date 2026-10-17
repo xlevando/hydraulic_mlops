@@ -1029,6 +1029,7 @@ dev = [
     { name = "testcontainers", extra = ["rabbitmq"] },
 ]
 web = [
+    { name = "aiohttp" },
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "faststream", extra = ["rabbit"] },
@@ -1056,6 +1057,7 @@ dev = [
     { name = "testcontainers", extras = ["rabbitmq"], specifier = ">=4.15.0" },
 ]
 web = [
+    { name = "aiohttp", specifier = ">=3.10.0" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "faststream", extras = ["rabbit"], specifier = ">=0.7.7" },

@@ -32,6 +32,7 @@ web = [
     "matplotlib>=3.11.2",
     "seaborn>=0.13.2",
     "faststream[rabbit]>=0.7.7",
+    "aiohttp>=3.10.0",
 ]
 
 [tool.ruff]
