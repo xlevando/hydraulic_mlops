@@ -74,6 +74,13 @@ docstring-code-line-length = "dynamic"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "integration: integration tests with Testcontainers (require Docker)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:testcontainers.*",
+    "ignore::DeprecationWarning:testcontainers.community.*",
+]
 addopts = [
     "--cov=src",
     "--cov-report=term-missing",

@@ -61,7 +61,7 @@ async def create_task(
         if unexpected:
             detail["unexpected_features"] = sorted(unexpected)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=detail,
         )
 
