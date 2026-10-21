@@ -38,6 +38,67 @@
 **Суть:** Добавление второго воркера (4 потока + 4 потока) без изменения кода.
 **Результат:** Пропускная способность (throughput) выросла с 3.4 до 5.0 задач/с, а latency p95 упала с 30.4 до 21.5 с. Общее время обработки 300 задач сократилось со 88.1 до **59.9 секунд**.
 
+### 5. Graceful Shutdown (SIGTERM под нагрузкой)
+
+**Суть:** Проверить, что при получении SIGTERM воркер не обрывает текущие задачи, а доводит их до конца и сохраняет в БД.
+
+**Команда:**
+```bash
+MODE=sigterm N_REQUESTS=300 QUEUE_MAX_LENGTH=100 SIGTERM_AT_SEC=30 DRAIN_TIMEOUT_SEC=30 \
+  uv run python -m scripts.experiment
+```
+
+**Результат:**
+```text
+sigterm_at_s: 31.63
+accepted: 300
+completed_in_db: 300
+lost: 0
+queue_final: 20
+```
+
+**Что видно в логах воркера:**
+```text
+2026-10-21T21:05:31.585 | SIGTERM received, starting graceful shutdown
+...
+2026-10-21T21:07:09.563 | Result saved for task 200b2c72e617
+```
+
+**Вывод:** Несмотря на то, что SIGTERM пришёл на 31-й секунде эксперимента, воркер продолжил обрабатывать уже принятые сообщения и сохранил последнюю задачу в БД спустя ~1.5 минуты после сигнала. `lost: 0` — ни одна задача не потеряна. В продакшене используется `docker stop` с grace period 30 сек, тогда FastStream вызывает `on_shutdown` и логирует `All inflight tasks completed`; при `docker kill` FastStream не доходит до этого хука, но in-flight задачи всё равно дообрабатываются (видно по `Result saved`).
+
+---
+
+### 6. Dead Letter Queue (DLQ)
+
+**Суть:** Сообщения, обработка которых завершается ошибкой, должны перенаправляться в DLQ и не «крутиться» бесконечно в основной очереди.
+
+**Проверка:** Отправлено сообщение с невалидной структурой (вместо 170 фич — `{"wrong": "data"}`) напрямую в очередь `tasks`, минуя API.
+
+**Команда отправки:**
+```python
+await broker.publish(
+    {"task_id": "bad_task_1", "features": {"wrong": "data"}},
+    queue="tasks",
+)
+```
+
+**Лог воркера:**
+```text
+KeyError: 'PS1_mean'
+INFO | tasks | 45c0ede1b8 - Processed
+INFO | dlx | tasks.dlq | 45c0ede1b8 - Received
+ERROR | __main__ | DLQ received (unrecoverable): {'task_id': 'bad_task_1', 'features': {'wrong': 'data'}}
+INFO | dlx | tasks.dlq | 45c0ede1b8 - Processed
+```
+
+**Что произошло:**
+1. Воркер упал на `KeyError` (нет нужных фич).
+2. FastStream сделал `nack(requeue=False)` — повторная доставка не выполняется, так как ошибка детерминирована.
+3. Exchange `dlx` (direct) перенаправил сообщение в `tasks.dlq`.
+4. Обработчик `dead_letter_handler` залогировал сообщение как unrecoverable.
+
+**Обоснование ack_policy:** подтверждение (`ack`) отправляется только после успешной записи результата в БД. При падении воркера до `_save_result` сообщение не подтверждается и возвращается в очередь (at-least-once). Retry для детерминированных ошибок (невалидные признаки) бессмыслен — сообщение упадёт при каждой попытке, поэтому лимит повторов = 0, сразу DLQ.
+
 ---
 
 ### Главные выводы
