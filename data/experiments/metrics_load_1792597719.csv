@@ -1,0 +1,2 @@
+ts,elapsed_s,queue_depth,dlq_depth,worker_mem_mb,publish_rate_1s,accepted,rejected_503,in_flight
+18:48:41,0.01,0,0,261.4,38.92,104,103,93
