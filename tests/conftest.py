@@ -1,6 +1,7 @@
 """Общие фикстуры тестов."""
 
 import os
+from collections.abc import AsyncGenerator
 from unittest.mock import MagicMock
 
 # Переменные окружения ДО любых импортов src.*
@@ -52,21 +53,21 @@ from src.services import model_registry  # noqa: E402
 
 model_registry.load_champion_models = lambda: _MOCK_MODELS
 
-
-# Импортируем app ПОСЛЕ патча
-from collections.abc import AsyncGenerator  # noqa: E402
-
+# Импорты после патча
 import pytest  # noqa: E402
 from asgi_lifespan import LifespanManager  # noqa: E402
+from faststream.rabbit import TestRabbitBroker  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from src.app import app  # noqa: E402
+from src.broker import broker  # noqa: E402
 
 
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient]:
-    """HTTP-клиент приложения: запускает lifespan (пул БД, app.state)."""
-    async with LifespanManager(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as http:
-            yield http
+    """HTTP-клиент приложения: подменяет RabbitMQ на in-memory и запускает lifespan."""
+    async with TestRabbitBroker(broker):
+        async with LifespanManager(app):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as http:
+                yield http
