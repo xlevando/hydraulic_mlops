@@ -1,6 +1,6 @@
 """Очереди RabbitMQ с backpressure и DLQ.
 
-Основная очередь (`tasks`) имеет ограничение в 10 000 сообщений.
+Основная очередь (`tasks`) имеет ограничение ёмкости (QUEUE_MAX_LENGTH).
 Когда очередь переполняется, RabbitMQ отклоняет публикацию новых
 сообщений (`reject-publish`) - механизм backpressure:
 издатель вынужден замедлиться.
@@ -10,19 +10,29 @@
 exchange `dlx`.
 """
 
-from faststream.rabbit import RabbitQueue
+import os
+
+from faststream.rabbit import ExchangeType, RabbitExchange, RabbitQueue
+
+QUEUE_MAX_LENGTH = int(os.getenv("QUEUE_MAX_LENGTH", "10000"))
+
+DLX = RabbitExchange(
+    name="dlx",
+    type=ExchangeType.DIRECT,
+    durable=True,
+)
 
 TASKS_QUEUE = RabbitQueue(
     name="tasks",
     durable=True,
+    routing_key="tasks",
     arguments={
-        "x-max-length": 10000,
+        "x-max-length": QUEUE_MAX_LENGTH,
         "x-overflow": "reject-publish",
         "x-dead-letter-exchange": "dlx",
         "x-dead-letter-routing-key": "tasks.dlq",
     },
 )
-
 
 DLQ_QUEUE = RabbitQueue(
     name="tasks.dlq",

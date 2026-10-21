@@ -84,6 +84,7 @@ services:
         LOG_LEVEL: INFO
         ENVIRONMENT: development
         MLFLOW_TRACKING_URI: http://mlflow:5001
+        INFERENCE_DELAY_SEC: "1.0"
       volumes:
         - ./config.yaml:/app/config.yaml:ro
       ports:
@@ -127,9 +128,13 @@ services:
       DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
       RABBITMQ_URL: "amqp://admin:admin@rabbitmq:5672/"
       MLFLOW_TRACKING_URI: "http://mlflow:5001"
-      INFERENCE_DELAY_SEC: "0.5"
+      INFERENCE_DELAY_SEC: "1.0"     # для эксперимента
+      WORKER_CONCURRENCY: "4"        # = max_workers пула = prefetch_count
+      QUEUE_MAX_LENGTH: "100"        # для эксперимента; в проде 10000
       LOG_LEVEL: INFO
       ENVIRONMENT: development
+    ports:
+      - "8001:8001"                  # health-сервер воркера
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     depends_on:

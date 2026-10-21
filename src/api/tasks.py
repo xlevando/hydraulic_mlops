@@ -8,6 +8,7 @@ Load shedding: при перегрузке очереди API немедленн
 """
 
 import logging
+import os
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -74,11 +75,20 @@ async def create_task(
             queue=TASKS_QUEUE,
         )
     except Exception as e:
-        log.warning("Publish rejected (queue overloaded): %s", e)
-        response.headers["Retry-After"] = "60"
+        raw = os.getenv("RETRY_AFTER_SEC") or os.getenv("INFERENCE_DELAY_SEC") or "5"
+        try:
+            retry_after = max(1, int(float(raw)))
+        except TypeError, ValueError:
+            retry_after = 5
+        log.warning(
+            "Publish rejected (queue overloaded), Retry-After=%ds: %s",
+            retry_after,
+            e,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Queue overloaded. Retry after 60s.",
+            detail=f"Queue overloaded. Retry after {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
         ) from e
 
     log.info("Task %s accepted", task_id)

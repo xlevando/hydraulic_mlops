@@ -13,19 +13,19 @@ import pandas as pd
 from aiohttp import web
 from faststream import FastStream
 
-from src.broker import TASKS_QUEUE, broker
+from src.broker import DLQ_QUEUE, DLX, TASKS_QUEUE, WORKER_CONCURRENCY, broker
 from src.db import close_db_pool, create_db_pool
 from src.logging_config import setup_logging
 from src.services.model_registry import load_champion_models
 
 log = logging.getLogger(__name__)
 
-
 _MODELS: dict = {}
-_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+_EXECUTOR = ThreadPoolExecutor(max_workers=WORKER_CONCURRENCY)
 _DB_POOL: asyncpg.Pool | None = None
 _INFLIGHT_TASKS: set[asyncio.Task] = set()
 _SHUTDOWN_EVENT = asyncio.Event()
+_HEALTH_RUNNER: web.AppRunner | None = None
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS task_results (
@@ -98,7 +98,16 @@ async def process_task(payload: dict) -> None:
             _INFLIGHT_TASKS.discard(current)
 
 
-# Health-check HTTP-сервер
+@broker.subscriber(DLQ_QUEUE, DLX)
+async def dead_letter_handler(payload: dict) -> None:
+    """Принимаем сообщения из DLQ: логируем и подтверждаем.
+
+    Это создаёт binding dlx => tasks.dlq и гарантирует, что dead-letter
+    сообщения не дропаются в никуда.
+    """
+    log.error("DLQ received (unrecoverable): %s", payload)
+
+
 async def _health_handler(request: web.Request) -> web.Response:
     """Health-check: отвечает, даже если воркер занят inference."""
     return web.json_response(
@@ -140,7 +149,7 @@ app = FastStream(broker)
 @app.after_startup
 async def startup() -> None:
     """Загрузить модели + БД + health-сервер."""
-    global _DB_POOL
+    global _DB_POOL, _MODELS, _HEALTH_RUNNER
     setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
     log.info("Инициализация БД")
@@ -149,12 +158,10 @@ async def startup() -> None:
         await conn.execute(_CREATE_TABLE_SQL)
 
     log.info("Загрузка champion-моделей из MLflow")
-    global _MODELS
     _MODELS = load_champion_models()
     log.info("Загружено моделей: %d", len(_MODELS))
 
-    # Health-сервер
-    app.state.health_runner = await _start_health_server(port=8001)
+    _HEALTH_RUNNER = await _start_health_server(port=8001)
 
     # SIGTERM
     _install_sigterm_handler(asyncio.get_event_loop())
@@ -162,7 +169,8 @@ async def startup() -> None:
 
 @app.on_shutdown
 async def shutdown() -> None:
-    """Graceful shutdown: дождаться текущих задач + закрыть ресурсы."""
+    """Graceful shutdown."""
+    global _HEALTH_RUNNER
     log.info("Graceful shutdown: ждём %d inflight-задач", len(_INFLIGHT_TASKS))
 
     # Ждём завершения текущих задач (с таймаутом)
@@ -173,12 +181,10 @@ async def shutdown() -> None:
         else:
             log.info("All inflight tasks completed")
 
-    # Закрываем health-сервер
-    runner = getattr(app.state, "health_runner", None)
-    if runner is not None:
-        await runner.cleanup()
+    if _HEALTH_RUNNER is not None:
+        await _HEALTH_RUNNER.cleanup()
+        _HEALTH_RUNNER = None
 
-    # Закрываем executor
     _EXECUTOR.shutdown(wait=True)
 
     # Закрываем БД

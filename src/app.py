@@ -14,6 +14,7 @@ from starlette.responses import Response
 
 from src import config, db, logging_config
 from src.api import api_router
+from src.broker import broker  # добавили импорт брокера
 from src.services.model_registry import load_champion_models
 
 log = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Жизненный цикл: создать пул БД при старте, закрыть при остановке."""
+    """Жизненный цикл: инициализация БД, RabbitMQ, моделей."""
     settings = config.get_settings()
     logging_config.setup_logging(settings.log_level)
 
@@ -29,7 +30,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.db_pool = await db.create_db_pool()
 
     log.info("Загрузка champion-моделей из MLflow")
-
     app.state.models = load_champion_models()
 
     log.info(
@@ -37,6 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         len(app.state.models),
         ", ".join(app.state.models),
     )
+
+    # подключить broker для publish
+    log.info("Подключение к RabbitMQ")
+    await broker.start()
 
     log.info(
         "Приложение %s v%s запущено (env=%s)",
@@ -48,6 +52,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     try:
         yield
     finally:
+        log.info("Отключение от RabbitMQ")
+        await broker.stop()
         await db.close_db_pool(app.state.db_pool)
         log.info("Приложение остановлено")
 
