@@ -1,6 +1,7 @@
 """Pydantic-контракты API приложения."""
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -57,8 +58,11 @@ class HealthReport(BaseModel):
     total_response_time_ms: float = Field(..., description="Общее время ответа в мс")
 
 
-class ProcessRequest(BaseModel):
-    """Входные признаки одного цикла гидравлической системы."""
+# === /api/v1/tasks (backpressure pipeline) ===
+
+
+class TaskRequest(BaseModel):
+    """Запрос на создание задачи — признаки одного цикла."""
 
     features: dict[str, float] = Field(
         ...,
@@ -66,7 +70,18 @@ class ProcessRequest(BaseModel):
     )
 
 
-class ProcessResponse(BaseModel):
-    """Результат диагностики гидравлической системы."""
+class TaskAcceptedResponse(BaseModel):
+    """Ответ на принятие задачи в очередь."""
 
-    predictions: dict[str, int]
+    task_id: str = Field(..., description="Уникальный ID задачи")
+    status: Literal["accepted"] = "accepted"
+
+
+class TaskResult(BaseModel):
+    """Результат inference — предсказания по 4 компонентам."""
+
+    task_id: str = Field(..., description="Уникальный ID задачи")
+    predictions: dict[str, int] = Field(
+        ...,
+        description="Предсказания по 4 компонентам",
+    )

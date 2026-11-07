@@ -35,6 +35,43 @@ services:
       - hydraulic-network
     restart: unless-stopped
 
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    container_name: hydraulic-rabbitmq
+    hostname: rabbitmq      # имя узла (rabbit@rabbitmq) должно быть постоянным, иначе данные в volume «потеряются»
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    ports:
+      - "5672:5672"     # AMQP — сюда подключаются pika, FastStream, Celery
+      - "15672:15672"   # веб-интерфейс и HTTP API
+      - "15692:15692"   # метрики Prometheus
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - hydraulic-network
+    restart: unless-stopped
+
   app:
       build:
         context: .
@@ -43,15 +80,19 @@ services:
       environment:
         # Вложенные поля переопределяются через разделитель `__` (env_nested_delimiter)
         DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
+        RABBITMQ_URL: "amqp://admin:admin@rabbitmq:5672/"
         LOG_LEVEL: INFO
         ENVIRONMENT: development
         MLFLOW_TRACKING_URI: http://mlflow:5001
+        INFERENCE_DELAY_SEC: "1.0"
       volumes:
         - ./config.yaml:/app/config.yaml:ro
       ports:
         - "8000:8000"
       depends_on:
         postgres:
+          condition: service_healthy
+        rabbitmq:
           condition: service_healthy
       healthcheck:
         test: ["CMD-SHELL", "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)\""]
@@ -76,9 +117,52 @@ services:
         - hydraulic-network
       restart: unless-stopped
 
+  # FastStream worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hydraulic-worker
+    command: ["uv", "run", "python", "-m", "src.worker.main"]
+    environment:
+      DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
+      RABBITMQ_URL: "amqp://admin:admin@rabbitmq:5672/"
+      MLFLOW_TRACKING_URI: "http://mlflow:5001"
+      INFERENCE_DELAY_SEC: "1.0"     # для эксперимента
+      WORKER_CONCURRENCY: "4"        # = max_workers пула = prefetch_count
+      QUEUE_MAX_LENGTH: "100"        # для эксперимента; в проде 10000
+      LOG_LEVEL: INFO
+      ENVIRONMENT: development
+    ports:
+      - "8001:8001"                  # health-сервер воркера
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - hydraulic-network
+    restart: unless-stopped
+
 
 volumes:
   postgres-data:
+  rabbitmq-data:
 
 
 networks:

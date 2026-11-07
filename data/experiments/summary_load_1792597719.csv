@@ -1,0 +1,2 @@
+mode,tag,n_requests,queue_max_length,worker_container,elapsed_http_s,elapsed_total_s,accepted,rejected_503,errors,completed_in_db,lost,dlq_final,queue_final,throughput_acc_per_s,latency_p50_s,latency_p95_s,latency_max_s,retry_after_median,retry_after_p95,sigterm_at_s
+load,load_1792597719,300,100,hydraulic-worker,3.69,32.35,104,196,0,104,0,0,32,3.215,15.931,28.991,30.106,1.0,1.0,
