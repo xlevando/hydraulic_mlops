@@ -1,0 +1,37 @@
+name: hydraulic-observability
+
+services:
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: hydraulic-loki
+    profiles: ["logs", "observability"]
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    environment:
+      - LOKI_LIMITS_CONFIG_REJECT_OLD_SAMPLES=false
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+  alloy:
+    image: grafana/alloy:v1.5.0
+    container_name: hydraulic-alloy
+    profiles: ["logs", "observability"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - "12345:12345"
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    depends_on:
+      - loki
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  loki-data:
