@@ -3,6 +3,7 @@
 Запуск: `uv run uvicorn src.app:app --reload`
 """
 
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from fastapi import FastAPI, Request
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from prometheus_client import Counter, Histogram, make_asgi_app
 
 from src import config, db, logging_config
 from src.api import api_router
@@ -82,14 +84,45 @@ def create_app() -> FastAPI:
     HTTPXClientInstrumentor().instrument()
     AsyncPGInstrumentor().instrument()
 
+    # метрики prometheus
+
+    # cчётчик запросов (разбивка по методу, пути и коду ответа)
+    REQUEST_COUNT = Counter(  # noqa: N806
+        "api_requests_total",
+        "Total API requests",
+        ["method", "path", "status_code"],
+    )
+    # гистограмма длительности (бакеты под наш response time)
+    REQUEST_LATENCY = Histogram(  # noqa: N806
+        "api_request_duration_seconds",
+        "API request duration in seconds",
+        ["method", "path"],
+        buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+    )
+
+    # монтируем эндпоинт /metrics (Prometheus будет сюда стучаться)
+    app.mount("/metrics", make_asgi_app())
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next):  # noqa: ANN001, ANN202
         request_id = uuid.uuid4().hex[:8]
         # Привязываем request_id к контексту structlog
         structlog.contextvars.bind_contextvars(request_id=request_id)
+
+        start_time = time.time()  # засекаем время для метрики
+
         try:
             log.info("Request started", method=request.method, path=request.url.path)
             response = await call_next(request)
+
+            # обновляем метрики
+            duration = time.time() - start_time
+            path = request.url.path
+            REQUEST_COUNT.labels(
+                method=request.method, path=path, status_code=response.status_code
+            ).inc()
+            REQUEST_LATENCY.labels(method=request.method, path=path).observe(duration)
+
             log.info("Request finished", status_code=response.status_code)
             return response
         finally:

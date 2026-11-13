@@ -46,10 +46,12 @@ all-up-obs:
 	docker compose up -d
 	cd infra && docker compose up -d
 	docker compose --profile observability up -d
+	sleep 5
 	-docker network connect hydraulic-network hydraulic-otel-collector
 	-docker network connect hydraulic-network hydraulic-jaeger
 	-docker network connect hydraulic-network hydraulic-loki
 	-docker network connect hydraulic-network hydraulic-alloy
+	-docker network connect hydraulic-network hydraulic-prometheus
 
 all-down:
 	cd infra && docker compose down

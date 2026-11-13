@@ -14,6 +14,7 @@ from aiohttp import web
 from faststream import FastStream
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 from src.broker import DLQ_QUEUE, DLX, TASKS_QUEUE, WORKER_CONCURRENCY, broker
 from src.db import close_db_pool, create_db_pool
@@ -21,9 +22,24 @@ from src.logging_config import setup_logging
 from src.services.model_registry import load_champion_models
 from src.tracing import setup_tracing
 
+log = structlog.get_logger()
 tracer = trace.get_tracer(__name__)
 
-log = structlog.get_logger()
+# метрики prometheus
+TASKS_PROCESSED = Counter(
+    "worker_tasks_processed_total",
+    "Total processed tasks",
+    ["status"],
+)
+INFERENCE_DURATION = Histogram(
+    "worker_inference_duration_seconds",
+    "Inference duration",
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0),
+)
+TASKS_IN_PROGRESS = Gauge(
+    "worker_tasks_in_progress",
+    "Tasks currently in progress",
+)
 
 _MODELS: dict = {}
 _EXECUTOR = ThreadPoolExecutor(max_workers=WORKER_CONCURRENCY)
@@ -84,6 +100,7 @@ async def _save_result(task_id: str, predictions: dict[str, int]) -> None:
 
 @broker.subscriber(TASKS_QUEUE)
 async def process_task(payload: dict) -> None:
+    """Обработать задачу из очереди."""
     task_id = payload.get("task_id", "unknown")
     features = payload.get("features", {})
 
@@ -92,6 +109,8 @@ async def process_task(payload: dict) -> None:
     with tracer.start_as_current_span("process_task") as span:
         span.set_attribute("task.id", task_id)
         structlog.contextvars.bind_contextvars(task_id=task_id)
+
+        TASKS_IN_PROGRESS.inc()
 
         current = asyncio.current_task()
         if current is not None:
@@ -102,26 +121,30 @@ async def process_task(payload: dict) -> None:
             loop = asyncio.get_event_loop()
 
             with tracer.start_as_current_span("inference"):
+                start_time = time.time()
                 predictions = await loop.run_in_executor(_EXECUTOR, _run_inference, features)
+                INFERENCE_DURATION.observe(time.time() - start_time)
 
             log.info("Task inference done", predictions=predictions)
 
             with tracer.start_as_current_span("save_to_db"):
                 await _save_result(task_id, predictions)
 
+            TASKS_PROCESSED.labels(status="ok").inc()
+
         except Exception as e:
+            TASKS_PROCESSED.labels(status="error").inc()
             span.record_exception(e)
             span.set_status(Status(StatusCode.ERROR, str(e)))
             log.error("Failed to process task", error=str(e), exc_info=True)
 
-            # ПРИНУДИТЕЛЬНО отправляем спаны в Collector прямо сейчас
-            from opentelemetry import trace
-
+            # Принудительно отправляем спаны в Collector
             trace.get_tracer_provider().force_flush(timeout_millis=3000)
 
             raise e
 
         finally:
+            TASKS_IN_PROGRESS.dec()
             structlog.contextvars.clear_contextvars()
             if current is not None:
                 _INFLIGHT_TASKS.discard(current)
@@ -181,6 +204,11 @@ async def startup() -> None:
     global _DB_POOL, _MODELS, _HEALTH_RUNNER
     setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
+    try:
+        setup_tracing(service_name="hydraulic-worker")
+    except Exception as e:  # noqa: BLE001
+        log.warning("OTel tracing disabled", error=str(e))
+
     log.info("Инициализация БД")
     _DB_POOL = await create_db_pool()
     async with _DB_POOL.acquire() as conn:
@@ -191,6 +219,10 @@ async def startup() -> None:
     log.info("Загружено моделей: %d", len(_MODELS))
 
     _HEALTH_RUNNER = await _start_health_server(port=8001)
+
+    # Запускаем сервер метрик Prometheus на порту 8002
+    start_http_server(8002)
+    log.info("Prometheus metrics server on :8002")
 
     # SIGTERM
     _install_sigterm_handler(asyncio.get_event_loop())

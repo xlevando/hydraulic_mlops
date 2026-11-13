@@ -62,6 +62,18 @@ services:
       resources:
         limits:
           memory: 256M
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: hydraulic-prometheus
+    profiles: ["metrics", "observability"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   loki-data:
