@@ -13,6 +13,7 @@ import structlog
 from aiohttp import web
 from faststream import FastStream
 from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from src.broker import DLQ_QUEUE, DLX, TASKS_QUEUE, WORKER_CONCURRENCY, broker
 from src.db import close_db_pool, create_db_pool
@@ -107,6 +108,18 @@ async def process_task(payload: dict) -> None:
 
             with tracer.start_as_current_span("save_to_db"):
                 await _save_result(task_id, predictions)
+
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            log.error("Failed to process task", error=str(e), exc_info=True)
+
+            # ПРИНУДИТЕЛЬНО отправляем спаны в Collector прямо сейчас
+            from opentelemetry import trace
+
+            trace.get_tracer_provider().force_flush(timeout_millis=3000)
+
+            raise e
 
         finally:
             structlog.contextvars.clear_contextvars()

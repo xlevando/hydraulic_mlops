@@ -31,6 +31,6 @@ def setup_tracing() -> None:
     )
 
     exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+    provider.add_span_processor(BatchSpanProcessor(exporter, schedule_delay_millis=100))
 
     trace.set_tracer_provider(provider)
