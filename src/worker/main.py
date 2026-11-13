@@ -256,5 +256,4 @@ async def shutdown() -> None:
 
 
 if __name__ == "__main__":
-    setup_tracing()
     asyncio.run(app.run())

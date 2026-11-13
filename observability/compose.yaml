@@ -74,6 +74,28 @@ services:
       resources:
         limits:
           memory: 256M
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: hydraulic-grafana
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   loki-data:
+  grafana-data:
