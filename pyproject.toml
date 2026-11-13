@@ -5,6 +5,13 @@ description = "MLOps-система диагностики гидравличе�
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "opentelemetry-api>=1.45.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.45.0",
+    "opentelemetry-instrumentation-asyncpg>=0.66b0",
+    "opentelemetry-instrumentation-fastapi>=0.66b0",
+    "opentelemetry-instrumentation-httpx>=0.66b0",
+    "opentelemetry-instrumentation-logging>=0.66b0",
+    "opentelemetry-sdk>=1.45.0",
     "structlog>=26.1.0",
 ]
 

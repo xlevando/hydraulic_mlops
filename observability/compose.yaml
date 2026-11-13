@@ -16,6 +16,7 @@ services:
       resources:
         limits:
           memory: 256M
+
   alloy:
     image: grafana/alloy:v1.5.0
     container_name: hydraulic-alloy
@@ -28,6 +29,35 @@ services:
     command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
     depends_on:
       - loki
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    container_name: hydraulic-jaeger
+    profiles: ["traces", "observability"]
+    ports:
+      - "16686:16686"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  otel-collector:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.153.0
+    container_name: hydraulic-otel-collector
+    profiles: ["traces", "observability"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger
     deploy:
       resources:
         limits:

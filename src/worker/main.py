@@ -12,11 +12,15 @@ import pandas as pd
 import structlog
 from aiohttp import web
 from faststream import FastStream
+from opentelemetry import trace
 
 from src.broker import DLQ_QUEUE, DLX, TASKS_QUEUE, WORKER_CONCURRENCY, broker
 from src.db import close_db_pool, create_db_pool
 from src.logging_config import setup_logging
 from src.services.model_registry import load_champion_models
+from src.tracing import setup_tracing
+
+tracer = trace.get_tracer(__name__)
 
 log = structlog.get_logger()
 
@@ -79,28 +83,35 @@ async def _save_result(task_id: str, predictions: dict[str, int]) -> None:
 
 @broker.subscriber(TASKS_QUEUE)
 async def process_task(payload: dict) -> None:
-    """Обработать задачу из очереди."""
     task_id = payload.get("task_id", "unknown")
     features = payload.get("features", {})
 
-    # Привязываем task_id к контексту structlog
-    structlog.contextvars.bind_contextvars(task_id=task_id)
+    # Middleware уже извлёк контекст из заголовков сообщения и создал спан process
+    # Здесь tracer.start_as_current_span создаст дочерний спан
+    with tracer.start_as_current_span("process_task") as span:
+        span.set_attribute("task.id", task_id)
+        structlog.contextvars.bind_contextvars(task_id=task_id)
 
-    current = asyncio.current_task()
-    if current is not None:
-        _INFLIGHT_TASKS.add(current)
-
-    try:
-        log.info("Processing task started")  # task_id подтянется из контекста
-        loop = asyncio.get_event_loop()
-        predictions = await loop.run_in_executor(_EXECUTOR, _run_inference, features)
-        log.info("Task inference done", predictions=predictions)
-        await _save_result(task_id, predictions)
-    finally:
-        # Чистим контекст после обработки
-        structlog.contextvars.clear_contextvars()
+        current = asyncio.current_task()
         if current is not None:
-            _INFLIGHT_TASKS.discard(current)
+            _INFLIGHT_TASKS.add(current)
+
+        try:
+            log.info("Processing task started")
+            loop = asyncio.get_event_loop()
+
+            with tracer.start_as_current_span("inference"):
+                predictions = await loop.run_in_executor(_EXECUTOR, _run_inference, features)
+
+            log.info("Task inference done", predictions=predictions)
+
+            with tracer.start_as_current_span("save_to_db"):
+                await _save_result(task_id, predictions)
+
+        finally:
+            structlog.contextvars.clear_contextvars()
+            if current is not None:
+                _INFLIGHT_TASKS.discard(current)
 
 
 @broker.subscriber(DLQ_QUEUE, DLX)
@@ -200,4 +211,5 @@ async def shutdown() -> None:
 
 
 if __name__ == "__main__":
+    setup_tracing()
     asyncio.run(app.run())

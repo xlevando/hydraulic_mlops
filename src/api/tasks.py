@@ -58,12 +58,13 @@ async def create_task(
 
     try:
         await broker.publish(
-            {"task_id": task_id, "features": payload.features},
+            {
+                "task_id": task_id,
+                "features": payload.features,
+            },
             queue=TASKS_QUEUE,
         )
     except Exception as e:
-        # ВРЕМЕННО: логируем настоящую ошибку, чтобы понять, что падает
-        log.error("Publish failed with REAL error", exc_info=True, error=str(e))
         raw = os.getenv("RETRY_AFTER_SEC") or os.getenv("INFERENCE_DELAY_SEC") or "5"
         try:
             retry_after = max(1, int(float(raw)))

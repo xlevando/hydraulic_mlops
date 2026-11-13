@@ -9,11 +9,15 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
+from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from src import config, db, logging_config
 from src.api import api_router
 from src.broker import broker  # добавили импорт брокера
 from src.services.model_registry import load_champion_models
+from src.tracing import setup_tracing
 
 log = structlog.get_logger()
 
@@ -60,12 +64,23 @@ def create_app() -> FastAPI:
     """Собрать и настроить приложение FastAPI."""
     settings = config.get_settings()
 
+    # Инициализация OTel (ДО создания app, чтобы инструментация подхватилась)
+    try:
+        setup_tracing()
+    except Exception as e:  # noqa: BLE001
+        log.warning("OTel tracing disabled", error=str(e))
+
     app = FastAPI(
         title=settings.app.name,
         version=settings.app.version,
         description=settings.app.description,
         lifespan=lifespan,
     )
+
+    # Авто-инструментация
+    FastAPIInstrumentor.instrument_app(app)
+    HTTPXClientInstrumentor().instrument()
+    AsyncPGInstrumentor().instrument()
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):  # noqa: ANN001, ANN202
