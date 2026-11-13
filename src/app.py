@@ -3,21 +3,19 @@
 Запуск: `uv run uvicorn src.app:app --reload`
 """
 
-import logging
-import time
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
-from starlette.responses import Response
 
 from src import config, db, logging_config
 from src.api import api_router
 from src.broker import broker  # добавили импорт брокера
 from src.services.model_registry import load_champion_models
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 @asynccontextmanager
@@ -70,30 +68,18 @@ def create_app() -> FastAPI:
     )
 
     @app.middleware("http")
-    async def log_requests(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        """Поставить request_id в контекст и залогировать запрос."""
+    async def log_requests(request: Request, call_next):  # noqa: ANN001, ANN202
         request_id = uuid.uuid4().hex[:8]
-        token = logging_config.REQUEST_ID.set(request_id)
-        start = time.perf_counter()
-
+        # Привязываем request_id к контексту structlog
+        structlog.contextvars.bind_contextvars(request_id=request_id)
         try:
+            log.info("Request started", method=request.method, path=request.url.path)
             response = await call_next(request)
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            log.info(
-                "%s %s -> %d (%.1f ms)",
-                request.method,
-                request.url.path,
-                response.status_code,
-                elapsed_ms,
-            )
+            log.info("Request finished", status_code=response.status_code)
+            return response
         finally:
-            logging_config.REQUEST_ID.reset(token)
-
-        response.headers["X-Request-ID"] = request_id
-        return response
+            # Чистим контекст после запроса
+            structlog.contextvars.clear_contextvars()
 
     app.include_router(api_router)
     return app

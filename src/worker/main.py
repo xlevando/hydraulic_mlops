@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import logging
 import os
 import signal
 import time
@@ -10,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import asyncpg
 import pandas as pd
+import structlog
 from aiohttp import web
 from faststream import FastStream
 
@@ -18,7 +18,7 @@ from src.db import close_db_pool, create_db_pool
 from src.logging_config import setup_logging
 from src.services.model_registry import load_champion_models
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _MODELS: dict = {}
 _EXECUTOR = ThreadPoolExecutor(max_workers=WORKER_CONCURRENCY)
@@ -70,9 +70,10 @@ async def _save_result(task_id: str, predictions: dict[str, int]) -> None:
     try:
         async with _DB_POOL.acquire() as conn:
             await conn.execute(_SAVE_RESULT_SQL, task_id, json.dumps(predictions))
-        log.info("Result saved for task %s", task_id)
+        log.info("Result saved to DB")  # task_id подтянется сам
     except Exception as e:
-        log.error("Failed to save result for %s: %s", task_id, e)
+        # Логируем ошибку со стектрейсом (exc_info=True)
+        log.error("Failed to save result to DB", error=str(e), exc_info=True)
         raise
 
 
@@ -82,18 +83,22 @@ async def process_task(payload: dict) -> None:
     task_id = payload.get("task_id", "unknown")
     features = payload.get("features", {})
 
-    # Регистрируем inflight-задачу
+    # Привязываем task_id к контексту structlog
+    structlog.contextvars.bind_contextvars(task_id=task_id)
+
     current = asyncio.current_task()
     if current is not None:
         _INFLIGHT_TASKS.add(current)
 
     try:
-        log.info("Processing task %s", task_id)
+        log.info("Processing task started")  # task_id подтянется из контекста
         loop = asyncio.get_event_loop()
         predictions = await loop.run_in_executor(_EXECUTOR, _run_inference, features)
-        log.info("Task %s done: %s", task_id, predictions)
+        log.info("Task inference done", predictions=predictions)
         await _save_result(task_id, predictions)
     finally:
+        # Чистим контекст после обработки
+        structlog.contextvars.clear_contextvars()
         if current is not None:
             _INFLIGHT_TASKS.discard(current)
 
@@ -105,7 +110,7 @@ async def dead_letter_handler(payload: dict) -> None:
     Это создаёт binding dlx => tasks.dlq и гарантирует, что dead-letter
     сообщения не дропаются в никуда.
     """
-    log.error("DLQ received (unrecoverable): %s", payload)
+    log.error("DLQ received (unrecoverable)", payload=payload)
 
 
 async def _health_handler(request: web.Request) -> web.Response:

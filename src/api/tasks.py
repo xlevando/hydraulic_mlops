@@ -1,22 +1,15 @@
-"""API-эндпоинт для публикации задач в очередь RabbitMQ.
+"""API-эндпоинт для публикации задач в очередь RabbitMQ."""
 
-Load shedding: при перегрузке очереди API немедленно возвращает 503
-с заголовком Retry-After, не принимая задачу в обработку.
-
-Валидация признаков происходит здесь (fail fast) — до публикации
-в очередь (экономия ресурсов очереди и воркера)
-"""
-
-import logging
 import os
 import uuid
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from src.broker import TASKS_QUEUE, broker
 from src.schemas import TaskAcceptedResponse, TaskRequest
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 tasks_router = APIRouter(
     prefix="/api/v1",
@@ -34,12 +27,7 @@ async def create_task(
     response: Response,
     payload: TaskRequest,
 ) -> TaskAcceptedResponse:
-    """Опубликовать задачу в очередь.
-    Load shedding:
-        Если очередь переполнена, API возвращает 503 + Retry-After.
-        Задача не остаётся в системе в состоянии PENDING.
-    """
-    # валидация признаков (fail fast)
+    """Опубликовать задачу в очередь."""
     models = request.app.state.models
 
     if not models:
@@ -66,7 +54,6 @@ async def create_task(
             detail=detail,
         )
 
-    #  публикация в очередь
     task_id = uuid.uuid4().hex[:12]
 
     try:
@@ -75,15 +62,17 @@ async def create_task(
             queue=TASKS_QUEUE,
         )
     except Exception as e:
+        # ВРЕМЕННО: логируем настоящую ошибку, чтобы понять, что падает
+        log.error("Publish failed with REAL error", exc_info=True, error=str(e))
         raw = os.getenv("RETRY_AFTER_SEC") or os.getenv("INFERENCE_DELAY_SEC") or "5"
         try:
             retry_after = max(1, int(float(raw)))
         except TypeError, ValueError:
             retry_after = 5
         log.warning(
-            "Publish rejected (queue overloaded), Retry-After=%ds: %s",
-            retry_after,
-            e,
+            "Publish rejected (queue overloaded)",
+            retry_after=retry_after,
+            error=str(e),
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -91,5 +80,5 @@ async def create_task(
             headers={"Retry-After": str(retry_after)},
         ) from e
 
-    log.info("Task %s accepted", task_id)
+    log.info("Task accepted", task_id=task_id)
     return TaskAcceptedResponse(task_id=task_id)
