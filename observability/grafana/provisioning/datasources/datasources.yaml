@@ -15,6 +15,13 @@ datasources:
     url: http://hydraulic-loki:3100
     jsonData:
       maxLines: 1000
+      # Добавляем связь с трейсами
+      derivedFields:
+        - datasourceUid: jaeger
+          matcherRegex: '"trace_id":\s*"([^"]+)"' # Ищем trace_id в JSON-логе
+          name: TraceID
+          url: "$${__value.raw}" # Куда переходить
+          urlDisplayLabel: "View Trace in Jaeger"
 
   - name: Jaeger
     uid: jaeger
