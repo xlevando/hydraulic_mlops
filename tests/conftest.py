@@ -4,6 +4,7 @@ import os
 from collections.abc import AsyncGenerator
 from unittest.mock import MagicMock
 
+os.environ["OTEL_SDK_DISABLED"] = "true"
 # Переменные окружения ДО любых импортов src.*
 os.environ["DATABASE__URL"] = "postgresql://postgres:postgres@127.0.0.1:59999/hydraulic_mlops"
 os.environ["MLFLOW_TRACKING_URI"] = "http://localhost:5001"

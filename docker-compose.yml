@@ -46,12 +46,14 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: admin
+      RABBITMQ_PROMETHEUS_RETURN_PER_OBJECT_METRICS: "true"
     ports:
       - "5672:5672"     # AMQP — сюда подключаются pika, FastStream, Celery
       - "15672:15672"   # веб-интерфейс и HTTP API
       - "15692:15692"   # метрики Prometheus
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./observability/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-prometheus.conf:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
