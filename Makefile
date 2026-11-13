@@ -56,3 +56,8 @@ all-up-obs:
 all-down:
 	cd infra && docker compose down
 	docker compose down
+
+all-down-obs:
+	-docker compose --profile observability down
+	-cd infra && docker compose down
+	-docker compose down
