@@ -7,7 +7,10 @@ services:
     profiles: ["logs", "observability"]
     ports:
       - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
+    command:
+    - -config.file=/etc/loki/local-config.yaml
+    - -limits-config.retention_period=72h
+    - -compactor.retention_enabled=true
     volumes:
       - loki-data:/loki
     environment:
@@ -74,6 +77,10 @@ services:
       resources:
         limits:
           memory: 256M
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+
   grafana:
     image: grafana/grafana:11.1.0
     container_name: hydraulic-grafana
