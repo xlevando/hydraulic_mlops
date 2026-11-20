@@ -1,0 +1,29 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    url: http://hydraulic-prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: "15s"
+
+  - name: Loki
+    uid: loki
+    type: loki
+    url: http://hydraulic-loki:3100
+    jsonData:
+      maxLines: 1000
+      # Добавляем связь с трейсами
+      derivedFields:
+        - datasourceUid: jaeger
+          matcherRegex: '"trace_id":\s*"([^"]+)"' # Ищем trace_id в JSON-логе
+          name: TraceID
+          url: "$${__value.raw}" # Куда переходить
+          urlDisplayLabel: "View Trace in Jaeger"
+
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    url: http://hydraulic-jaeger:16686

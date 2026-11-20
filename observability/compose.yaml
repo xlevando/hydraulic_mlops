@@ -1,0 +1,108 @@
+name: hydraulic-observability
+
+services:
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: hydraulic-loki
+    profiles: ["logs", "observability"]
+    ports:
+      - "3100:3100"
+    command:
+    - -config.file=/etc/loki/local-config.yaml
+    - -limits-config.retention_period=72h
+    - -compactor.retention_enabled=true
+    volumes:
+      - loki-data:/loki
+    environment:
+      - LOKI_LIMITS_CONFIG_REJECT_OLD_SAMPLES=false
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  alloy:
+    image: grafana/alloy:v1.5.0
+    container_name: hydraulic-alloy
+    profiles: ["logs", "observability"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - "12345:12345"
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    depends_on:
+      - loki
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    container_name: hydraulic-jaeger
+    profiles: ["traces", "observability"]
+    ports:
+      - "16686:16686"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  otel-collector:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.153.0
+    container_name: hydraulic-otel-collector
+    profiles: ["traces", "observability"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: hydraulic-prometheus
+    profiles: ["metrics", "observability"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: hydraulic-grafana
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  loki-data:
+  grafana-data:

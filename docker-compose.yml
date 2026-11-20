@@ -1,3 +1,6 @@
+include:
+  - path: observability/compose.yaml
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -43,12 +46,14 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: admin
+      RABBITMQ_PROMETHEUS_RETURN_PER_OBJECT_METRICS: "true"
     ports:
       - "5672:5672"     # AMQP — сюда подключаются pika, FastStream, Celery
       - "15672:15672"   # веб-интерфейс и HTTP API
       - "15692:15692"   # метрики Prometheus
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ./observability/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-prometheus.conf:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
@@ -73,49 +78,50 @@ services:
     restart: unless-stopped
 
   app:
-      build:
-        context: .
-        dockerfile: Dockerfile
-      container_name: hydraulic-app
-      environment:
-        # Вложенные поля переопределяются через разделитель `__` (env_nested_delimiter)
-        DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
-        RABBITMQ_URL: "amqp://admin:admin@rabbitmq:5672/"
-        LOG_LEVEL: INFO
-        ENVIRONMENT: development
-        MLFLOW_TRACKING_URI: http://mlflow:5001
-        INFERENCE_DELAY_SEC: "1.0"
-      volumes:
-        - ./config.yaml:/app/config.yaml:ro
-      ports:
-        - "8000:8000"
-      depends_on:
-        postgres:
-          condition: service_healthy
-        rabbitmq:
-          condition: service_healthy
-      healthcheck:
-        test: ["CMD-SHELL", "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)\""]
-        interval: 30s
-        timeout: 5s
-        retries: 3
-        start_period: 10s
-      logging:
-        driver: json-file
-        options:
-          max-size: "10m"
-          max-file: "3"
-      deploy:
-        resources:
-          limits:
-            cpus: "1.0"
-            memory: 512M
-          reservations:
-            cpus: "0.25"
-            memory: 256M
-      networks:
-        - hydraulic-network
-      restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hydraulic-app
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://hydraulic-otel-collector:4317"
+      OTEL_SERVICE_NAME: "hydraulic-api"
+      DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
+      RABBITMQ_URL: "amqp://admin:admin@rabbitmq:5672/"
+      LOG_LEVEL: INFO
+      ENVIRONMENT: development
+      MLFLOW_TRACKING_URI: http://mlflow:5001
+      INFERENCE_DELAY_SEC: "1.0"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - hydraulic-network
+    restart: unless-stopped
 
   # FastStream worker
   worker:
@@ -125,6 +131,8 @@ services:
     container_name: hydraulic-worker
     command: ["uv", "run", "python", "-m", "src.worker.main"]
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://hydraulic-otel-collector:4317"
+      OTEL_SERVICE_NAME: "hydraulic-worker"
       DATABASE__URL: "postgresql://postgres:postgres@postgres:5432/hydraulic_mlops"
       RABBITMQ_URL: "amqp://admin:admin@rabbitmq:5672/"
       MLFLOW_TRACKING_URI: "http://mlflow:5001"
@@ -168,4 +176,4 @@ volumes:
 networks:
   hydraulic-network:
     name: hydraulic-network
-    driver: bridge
+    external: true

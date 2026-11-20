@@ -1,0 +1,131 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: "Pipeline Alerts"
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      # алерт 1 - очередь заполнена > 90%
+      - uid: queue_high
+        title: "Очередь заполнена более чем на 90%"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: rabbitmq_queue_messages{queue="tasks"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: B
+              type: threshold
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: B
+              refId: C
+              type: threshold
+        for: 1m
+        annotations:
+          summary: "Очередь задач переполнена (более 90 сообщений)"
+        labels:
+          severity: warning
+        noDataState: NoData
+        execErrState: Error
+
+      # алерт 2 - в DLQ появились сообщения
+      - uid: dlq_growth
+        title: "Сообщения в Dead Letter Queue"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: rabbitmq_queue_messages{queue="tasks.dlq"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: B
+              type: threshold
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: B
+              refId: C
+              type: threshold
+        for: 0s
+        annotations:
+          summary: "Обнаружены сообщения в DLQ"
+        labels:
+          severity: critical
+        noDataState: NoData
+        execErrState: Error

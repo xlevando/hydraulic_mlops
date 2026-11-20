@@ -1,0 +1,51 @@
+// Обнаружение контейнеров
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Правила релейбла (добавляем container_name)
+discovery.relabel "app_containers" {
+  targets = []
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(hydraulic-loki|hydraulic-alloy|hydraulic-grafana)"
+    action        = "drop"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(hydraulic-app|hydraulic-worker)"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container_name"
+    regex         = "/(.*)"
+  }
+}
+
+// Чтение логов
+loki.source.docker "app_logs" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.app_containers.rules
+  forward_to    = [loki.process.add_labels.receiver]
+}
+
+// ПРИНУДИТЕЛЬНО добавляем лейбл job
+loki.process "add_labels" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.static_labels {
+    values = {
+      job = "hydraulic-logs",
+    }
+  }
+}
+
+// Отправка в Loki
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
