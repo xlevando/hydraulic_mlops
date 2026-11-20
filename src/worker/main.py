@@ -120,7 +120,9 @@ async def process_task(payload: dict) -> None:
             log.info("Processing task started")
             loop = asyncio.get_event_loop()
 
-            with tracer.start_as_current_span("inference"):
+            with tracer.start_as_current_span("inference") as inf_span:
+                inf_span.set_attribute("model.alias", "champion")
+                inf_span.set_attribute("model.version", "1")
                 start_time = time.time()
                 predictions = await loop.run_in_executor(_EXECUTOR, _run_inference, features)
                 INFERENCE_DURATION.observe(time.time() - start_time)
